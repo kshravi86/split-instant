@@ -19,25 +19,28 @@ struct NotesListView: View {
                             .font(.headline)
                             .lineLimit(1)
                         
-                        Text(note.content ?? "")
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                        
-                        Text(note.modifiedDate ?? Date(), style: .date)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack {
+                            Text(formattedDate(for: note.modifiedDate ?? Date()))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Text(note.content ?? "")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 4)
                 }
             }
             .onDelete(perform: deleteNotes)
         }
+        .listStyle(.plain) // Use plain style for a cleaner look
         .navigationTitle("Notes")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: addNote) {
-                    Label("Add Note", systemImage: "plus")
+                    Label("Add Note", systemImage: "plus.circle.fill") // Use a filled icon
                 }
             }
             ToolbarItem(placement: .navigationBarLeading) {
@@ -47,6 +50,12 @@ struct NotesListView: View {
         .sheet(isPresented: $showingAddNote) {
             NoteDetailView(note: nil)
         }
+    }
+
+    private func formattedDate(for date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     private func addNote() {

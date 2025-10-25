@@ -17,8 +17,6 @@ jobs:
     env:
       PROJECT_PATH: split-instant.xcodeproj
       SCHEME: NotesApp
-      ARCHIVE_PATH: ${{ runner.temp }}/SplitInstant.xcarchive
-      EXPORT_PATH: ${{ runner.temp }}/export
       IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
       P12_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
       P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
@@ -74,6 +72,7 @@ jobs:
       - name: Archive split-instant (Release)
         run: |
           set -eo pipefail
+          ARCHIVE_PATH="$RUNNER_TEMP/SplitInstant.xcarchive"
           xcodebuild archive \
             -project "$PROJECT_PATH" \
             -scheme "$SCHEME" \
@@ -139,6 +138,8 @@ jobs:
       - name: Export IPA
         run: |
           set -eo pipefail
+          ARCHIVE_PATH="$RUNNER_TEMP/SplitInstant.xcarchive"
+          EXPORT_PATH="$RUNNER_TEMP/export"
           mkdir -p "$EXPORT_PATH"
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
@@ -150,6 +151,7 @@ jobs:
       - name: Verify IPA artifact
         run: |
           set -euo pipefail
+          EXPORT_PATH="$RUNNER_TEMP/export"
           IPA=$(ls "$EXPORT_PATH"/*.ipa | head -n1 || true)
           if [ -z "$IPA" ]; then
             echo "::error::IPA not found in $EXPORT_PATH"
@@ -162,4 +164,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: split-instant-ipa-${{ github.run_number }}
-          path: ${{ env.EXPORT_PATH }}/*.ipa
+          path: ${{ runner.temp }}/export/*.ipa

@@ -1,43 +1,98 @@
-# GitHub Secrets for iOS CI/CD
+# GitHub Secrets for iOS IPA Builds
 
-This document explains the purpose of the secrets required for the `ios-build-ipa.yml` GitHub Actions workflow, how to obtain them, and why they are necessary for building and signing an iOS application.
+The workflow at `.github/workflows/ios-build-ipa.yml` imports four secrets to sign and export the `split-instant` IPA. This guide explains why each secret matters, how to generate it, and how to store it in GitHub.
 
-## 1. `IOS_TEAM_ID`
-
-| Aspect | Description |
-| :--- | :--- |
-| **Purpose** | Identifies your Apple Developer Program team. It is used by Xcode to correctly sign the application. |
-| **Why Needed** | Required for manual code signing to specify which development team is responsible for the app. |
-| **How to Get** | Log in to the [Apple Developer website](https://developer.apple.com/account/). The Team ID is listed under the **Membership** section. |
-| **Diagram** | `Apple Developer Account -> Membership -> Team ID (e.g., A1B2C3D4E5)` |
-
-## 2. `BUILD_CERTIFICATE_BASE64` (P12 File)
-
-| Aspect | Description |
-| :--- | :--- |
-| **Purpose** | Contains the private key and public certificate used to cryptographically sign your application, proving its origin. This is the base64 encoded content of your `.p12` file. |
-| **Why Needed** | Apple requires all apps to be signed with a valid certificate issued by them before they can be installed on a device or submitted to the App Store. |
-| **How to Get** | 1. Create a signing certificate (e.g., "Apple Distribution" or "iOS Development") via Xcode or the Apple Developer website. 2. Export the certificate and its private key from your macOS Keychain Access utility as a `.p12` file. 3. Convert the `.p12` file to a base64 string using a command like: `base64 -i your_cert.p12` (on macOS/Linux) or equivalent tool. |
-| **Diagram** | `Keychain Access -> Export Certificate + Key -> .p12 file -> base64 encoding -> SECRET` |
-
-## 3. `P12_PASSWORD`
-
-| Aspect | Description |
-| :--- | :--- |
-| **Purpose** | The password you set when exporting the `.p12` file. |
-| **Why Needed** | The `.p12` file is password-protected to secure the private key. The CI/CD process needs this password to unlock and import the certificate into the runner's keychain. |
-| **How to Get** | This is the password you chose during the `.p12` export process. |
-| **Diagram** | `(User-defined password during .p12 export)` |
-
-## 4. `PROVISIONING_PROFILE_BASE64` (Mobile Provisioning Profile)
-
-| Aspect | Description |
-| :--- | :--- |
-| **Purpose** | A file that links the App ID, the signing certificate, and the devices (for development/ad-hoc builds). This is the base64 encoded content of your `.mobileprovision` file. |
-| **Why Needed** | It authorizes the app to run on specific devices (non-App Store builds) and defines the app's capabilities (entitlements). The CI/CD process needs this to correctly provision the build. |
-| **How to Get** | 1. Create a Provisioning Profile (e.g., "App Store," "Ad Hoc," or "Development") on the [Apple Developer website](https://developer.apple.com/account/). 2. Download the `.mobileprovision` file. 3. Convert the `.mobileprovision` file to a base64 string using a command like: `base64 -i your_profile.mobileprovision` (on macOS/Linux) or equivalent tool. |
-| **Diagram** | `Apple Developer Account -> Profiles -> Download .mobileprovision -> base64 encoding -> SECRET` |
+> **Tip:** Add secrets in **Repository Settings -> Secrets and variables -> Actions**. Use the exact names below; missing values cause the workflow to stop before archiving.
 
 ---
 
-**Final Step:** Store these four values as secrets in your GitHub repository settings under **Settings > Secrets and variables > Actions**.
+## 1. `IOS_TEAM_ID`
+
+| Aspect | Details |
+| --- | --- |
+| **Meaning** | 10-character Team ID assigned to your Apple Developer Program membership (example: `A1B2C3D4E5`). |
+| **Workflow usage** | Passed to `xcodebuild archive` and the export plist so the runner signs as your team. |
+| **How to obtain** | 1. Sign in at [developer.apple.com/account](https://developer.apple.com/account/). 2. Open **Membership** and copy **Team ID**. |
+| **Double-check** | Run `xcodebuild -showBuildSettings | grep DEVELOPMENT_TEAM` locally; the value should match. |
+
+---
+
+## 2. `BUILD_CERTIFICATE_BASE64`
+
+This is the base64-encoded `.p12` that contains your Apple Distribution (or Development) certificate plus its private key.
+
+### Why the workflow needs it
+`apple-actions/import-codesign-certs@v2` imports the certificate so `xcodebuild` can sign the archive. Without it, the exported IPA cannot be installed.
+
+### Create and export the certificate
+1. **Create/download the cert**
+   - Xcode: *Settings -> Accounts -> Manage Certificates -> + -> Apple Distribution* (or Development).
+   - Web: [Certificates, IDs & Profiles](https://developer.apple.com/account/resources/certificates/list) -> plus button -> follow the prompts.
+2. **Export as `.p12`**
+   - Keychain Access -> *My Certificates* -> right-click the certificate -> **Export** -> choose `.p12` -> set a strong password (remember it for `P12_PASSWORD`).
+
+### Convert `.p12` to base64
+- **macOS/Linux:** `base64 -i split-instant-dist.p12 | pbcopy`
+- **Windows PowerShell:** `[Convert]::ToBase64String([IO.File]::ReadAllBytes("split-instant-dist.p12")) | Set-Clipboard`
+
+Paste the single-line string into the `BUILD_CERTIFICATE_BASE64` secret.
+
+---
+
+## 3. `P12_PASSWORD`
+
+| Aspect | Details |
+| --- | --- |
+| **Meaning** | Password set while exporting the `.p12`. |
+| **Workflow usage** | Supplied to the certificate import action so the runner can unlock the private key. |
+| **Notes** | Whenever you export a new `.p12`, update both `BUILD_CERTIFICATE_BASE64` and `P12_PASSWORD`. |
+
+---
+
+## 4. `PROVISIONING_PROFILE_BASE64`
+
+The provisioning profile binds `com.split.instant` to your certificate, entitlements, and (optionally) device UDIDs.
+
+### Choose the right profile type
+- **App Store**: For TestFlight/App Store submissions.
+- **Ad Hoc / Release Testing**: For distributing signed builds outside the store.
+- **Development**: For debugging builds that run on registered devices.
+
+### Create/download the profile
+1. Visit [Certificates, IDs & Profiles -> Profiles](https://developer.apple.com/account/resources/profiles/list).
+2. Click **+**, pick the profile type, select the `com.split.instant` App ID, choose the same certificate used in the `.p12`, pick devices if prompted, name the profile, and download the `.mobileprovision`.
+
+### Encode to base64
+- **macOS/Linux:** `base64 -i SplitInstant_Profile.mobileprovision | pbcopy`
+- **Windows PowerShell:** `[Convert]::ToBase64String([IO.File]::ReadAllBytes("SplitInstant_Profile.mobileprovision")) | Set-Clipboard`
+
+Paste the encoded string into `PROVISIONING_PROFILE_BASE64`.
+
+---
+
+## Add the secrets in GitHub
+
+1. Open the repository in a browser.
+2. Go to **Settings -> Secrets and variables -> Actions -> New repository secret**.
+3. Add each entry:
+
+| Secret | Value |
+| --- | --- |
+| `IOS_TEAM_ID` | Team ID string (10 characters). |
+| `BUILD_CERTIFICATE_BASE64` | Base64 string of the `.p12`. |
+| `P12_PASSWORD` | Password used when exporting the `.p12`. |
+| `PROVISIONING_PROFILE_BASE64` | Base64 string of the `.mobileprovision`. |
+
+4. Push to `main` or trigger the **iOS IPA Build** workflow manually to confirm the secrets are read successfully.
+
+---
+
+## Troubleshooting reference
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `Security: SecKeychainItemImport: User interaction is not allowed` | `P12_PASSWORD` is wrong or blank. | Re-export the `.p12`, update both secrets. |
+| `No profiles for 'com.split.instant' were found` | Provisioning profile lacks the bundle ID or was encoded incorrectly. | Regenerate the profile and re-encode it. |
+| `Provisioning profile "profile" doesn't include signing certificate` | Profile references a different certificate than the `.p12`. | Create a new profile selecting the matching certificate. |
+
+Keep this file up to date whenever certificates, profiles, or Apple accounts change so future contributors can refresh the CI signing assets quickly.

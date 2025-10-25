@@ -17,33 +17,33 @@ struct NoteDetailView: View {
     }
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                TextField("Title", text: $title)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .padding()
-                    .background(Color(.systemGray6))
-                
-                TextEditor(text: $content)
-                    .padding()
-                    .background(Color(.systemBackground))
+        VStack(spacing: 0) {
+            TextField("Title", text: $title, axis: .vertical)
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .padding(.horizontal)
+                .padding(.top)
+            
+            Divider()
+                .padding(.horizontal)
+            
+            TextEditor(text: $content)
+                .padding(.horizontal)
+        }
+        .navigationTitle(note == nil ? "New Note" : "Edit Note")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") {
+                    dismiss()
+                }
             }
-            .navigationTitle(note == nil ? "New Note" : "Edit Note")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Save") {
+                    saveNote()
+                    dismiss()
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        saveNote()
-                        dismiss()
-                    }
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
