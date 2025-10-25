@@ -1,8 +1,8 @@
-# GitHub Secrets for iOS IPA Builds
+# GitHub Secrets for iOS IPA Builds (Windows Workflow)
 
-The workflow at `.github/workflows/ios-build-ipa.yml` imports four secrets to sign and export the `split-instant` IPA. This guide explains why each secret matters, how to generate it, and how to store it in GitHub.
+The IPA is produced on GitHub Actions' macOS runners, so you can prepare everything from a Windows laptop. Your only local chores are downloading signing assets from the Apple Developer portal and converting those files to base64 strings with PowerShell/OpenSSL.
 
-> **Tip:** Add secrets in **Repository Settings -> Secrets and variables -> Actions**. Use the exact names below; missing values cause the workflow to stop before archiving.
+> Add secrets in **Repository Settings -> Secrets and variables -> Actions**. Use the exact names below so the workflow can read them.
 
 ---
 
@@ -10,32 +10,44 @@ The workflow at `.github/workflows/ios-build-ipa.yml` imports four secrets to si
 
 | Aspect | Details |
 | --- | --- |
-| **Meaning** | 10-character Team ID assigned to your Apple Developer Program membership (example: `A1B2C3D4E5`). |
-| **Workflow usage** | Passed to `xcodebuild archive` and the export plist so the runner signs as your team. |
-| **How to obtain** | 1. Sign in at [developer.apple.com/account](https://developer.apple.com/account/). 2. Open **Membership** and copy **Team ID**. |
-| **Double-check** | Run `xcodebuild -showBuildSettings | grep DEVELOPMENT_TEAM` locally; the value should match. |
+| **Meaning** | 10-character Team ID from your Apple Developer Program membership (example: `A1B2C3D4E5`). |
+| **Workflow usage** | Passed to `xcodebuild archive` and export options so the signed archive belongs to your team. |
+| **How to obtain** | Sign in at [developer.apple.com/account](https://developer.apple.com/account/), open **Membership**, copy **Team ID**. |
+| **Double-check** | Anyone with Xcode can run `xcodebuild -showBuildSettings | findstr DEVELOPMENT_TEAM` to verify the same ID. |
 
 ---
 
 ## 2. `BUILD_CERTIFICATE_BASE64`
 
-This is the base64-encoded `.p12` that contains your Apple Distribution (or Development) certificate plus its private key.
+This is the base64 representation of a `.p12` file that bundles your Apple Distribution (or Development) certificate plus its private key. Everything below can be done in Windows PowerShell.
 
-### Why the workflow needs it
-`apple-actions/import-codesign-certs@v2` imports the certificate so `xcodebuild` can sign the archive. Without it, the exported IPA cannot be installed.
+1. **Install OpenSSL**  
+   Download a Windows build (for example from [SLProWeb](https://slproweb.com/products/Win32OpenSSL.html)) and ensure `openssl.exe` is on `PATH`.
 
-### Create and export the certificate
-1. **Create/download the cert**
-   - Xcode: *Settings -> Accounts -> Manage Certificates -> + -> Apple Distribution* (or Development).
-   - Web: [Certificates, IDs & Profiles](https://developer.apple.com/account/resources/certificates/list) -> plus button -> follow the prompts.
-2. **Export as `.p12`**
-   - Keychain Access -> *My Certificates* -> right-click the certificate -> **Export** -> choose `.p12` -> set a strong password (remember it for `P12_PASSWORD`).
+2. **Generate a CSR and private key**
+   ```powershell
+   openssl req -new -newkey rsa:2048 -nodes `
+     -keyout splitinstant.key `
+     -out splitinstant.csr `
+     -subj "/CN=split-instant"
+   ```
 
-### Convert `.p12` to base64
-- **macOS/Linux:** `base64 -i split-instant-dist.p12 | pbcopy`
-- **Windows PowerShell:** `[Convert]::ToBase64String([IO.File]::ReadAllBytes("split-instant-dist.p12")) | Set-Clipboard`
+3. **Request the certificate**
+   - Go to [Certificates, IDs & Profiles](https://developer.apple.com/account/resources/certificates/list) -> **+**.
+   - Choose **Apple Distribution** (or **Apple Development**), upload `splitinstant.csr`, download the resulting `.cer`.
 
-Paste the single-line string into the `BUILD_CERTIFICATE_BASE64` secret.
+4. **Convert `.cer` + key into `.p12`**
+   ```powershell
+   openssl x509 -inform DER -in splitinstant.cer -out splitinstant.pem
+   openssl pkcs12 -export -inkey splitinstant.key -in splitinstant.pem -out splitinstant.p12
+   ```
+   Set a strong export password when prompted; you will store it as `P12_PASSWORD`.
+
+5. **Encode the `.p12` for GitHub**
+   ```powershell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("splitinstant.p12")) | Set-Clipboard
+   ```
+   Paste the clipboard contents into the `BUILD_CERTIFICATE_BASE64` secret.
 
 ---
 
@@ -43,47 +55,47 @@ Paste the single-line string into the `BUILD_CERTIFICATE_BASE64` secret.
 
 | Aspect | Details |
 | --- | --- |
-| **Meaning** | Password set while exporting the `.p12`. |
-| **Workflow usage** | Supplied to the certificate import action so the runner can unlock the private key. |
-| **Notes** | Whenever you export a new `.p12`, update both `BUILD_CERTIFICATE_BASE64` and `P12_PASSWORD`. |
+| **Meaning** | Password entered while running `openssl pkcs12 -export`. |
+| **Workflow usage** | Unlocks the `.p12` when `apple-actions/import-codesign-certs@v2` runs on GitHub Actions. |
+| **Tip** | Whenever you regenerate the `.p12`, update both this secret and `BUILD_CERTIFICATE_BASE64`. |
 
 ---
 
 ## 4. `PROVISIONING_PROFILE_BASE64`
 
-The provisioning profile binds `com.split.instant` to your certificate, entitlements, and (optionally) device UDIDs.
+Provisioning profiles bind the `com.split.instant` bundle identifier to your certificate (and devices, for development/ad-hoc builds).
 
-### Choose the right profile type
-- **App Store**: For TestFlight/App Store submissions.
-- **Ad Hoc / Release Testing**: For distributing signed builds outside the store.
-- **Development**: For debugging builds that run on registered devices.
+1. **Create/download the profile**
+   - Visit [Certificates, IDs & Profiles -> Profiles](https://developer.apple.com/account/resources/profiles/list).
+   - Click **+**, pick the profile type:
+     - *App Store* for TestFlight/App Store releases.
+     - *Ad Hoc / Release Testing* for sideload builds.
+     - *Development* for device debugging.
+   - Select the `com.split.instant` App ID and the same certificate used in `splitinstant.p12`.
+   - Download the `.mobileprovision` file.
 
-### Create/download the profile
-1. Visit [Certificates, IDs & Profiles -> Profiles](https://developer.apple.com/account/resources/profiles/list).
-2. Click **+**, pick the profile type, select the `com.split.instant` App ID, choose the same certificate used in the `.p12`, pick devices if prompted, name the profile, and download the `.mobileprovision`.
-
-### Encode to base64
-- **macOS/Linux:** `base64 -i SplitInstant_Profile.mobileprovision | pbcopy`
-- **Windows PowerShell:** `[Convert]::ToBase64String([IO.File]::ReadAllBytes("SplitInstant_Profile.mobileprovision")) | Set-Clipboard`
-
-Paste the encoded string into `PROVISIONING_PROFILE_BASE64`.
+2. **Encode the profile on Windows**
+   ```powershell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("SplitInstant_Profile.mobileprovision")) | Set-Clipboard
+   ```
+   Paste the clipboard contents into the `PROVISIONING_PROFILE_BASE64` secret.
 
 ---
 
 ## Add the secrets in GitHub
 
-1. Open the repository in a browser.
-2. Go to **Settings -> Secrets and variables -> Actions -> New repository secret**.
-3. Add each entry:
+1. Open the repository in a browser.  
+2. Go to **Settings -> Secrets and variables -> Actions -> New repository secret**.  
+3. Create these entries:
 
 | Secret | Value |
 | --- | --- |
-| `IOS_TEAM_ID` | Team ID string (10 characters). |
-| `BUILD_CERTIFICATE_BASE64` | Base64 string of the `.p12`. |
-| `P12_PASSWORD` | Password used when exporting the `.p12`. |
-| `PROVISIONING_PROFILE_BASE64` | Base64 string of the `.mobileprovision`. |
+| `IOS_TEAM_ID` | 10-character Team ID string. |
+| `BUILD_CERTIFICATE_BASE64` | Base64 output from `splitinstant.p12`. |
+| `P12_PASSWORD` | Export password from the OpenSSL step. |
+| `PROVISIONING_PROFILE_BASE64` | Base64 output from the `.mobileprovision`. |
 
-4. Push to `main` or trigger the **iOS IPA Build** workflow manually to confirm the secrets are read successfully.
+Trigger the **iOS IPA Build** workflow (push to `main` or run manually) to make sure the secrets are wired correctly.
 
 ---
 
@@ -91,8 +103,8 @@ Paste the encoded string into `PROVISIONING_PROFILE_BASE64`.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `Security: SecKeychainItemImport: User interaction is not allowed` | `P12_PASSWORD` is wrong or blank. | Re-export the `.p12`, update both secrets. |
-| `No profiles for 'com.split.instant' were found` | Provisioning profile lacks the bundle ID or was encoded incorrectly. | Regenerate the profile and re-encode it. |
-| `Provisioning profile "profile" doesn't include signing certificate` | Profile references a different certificate than the `.p12`. | Create a new profile selecting the matching certificate. |
+| `Security: SecKeychainItemImport: User interaction is not allowed` | `P12_PASSWORD` does not match the `.p12`. | Re-export the `.p12` and update both related secrets. |
+| `No profiles for 'com.split.instant' were found` | Provisioning profile missing the bundle ID or encoded incorrectly. | Recreate/download the profile and re-run the PowerShell base64 command. |
+| `Provisioning profile "profile" doesn't include signing certificate` | Profile references a different certificate than `splitinstant.p12`. | Generate a new profile selecting the matching certificate. |
 
-Keep this file up to date whenever certificates, profiles, or Apple accounts change so future contributors can refresh the CI signing assets quickly.
+Keep this guide updated whenever certificates, profiles, or Apple accounts change so Windows users can refresh CI credentials without touching Xcode.
