@@ -1,0 +1,222 @@
+If you’re looking to build an iPhone app similar to Splitwise — but with ~70% of the **core logic** running locally (on-device) and a minimal backend — here’s a breakdown of **how you might design and implement it**, plus which features to include, how to partition between local & server, and some tips/challenges.
+
+---
+
+## 1. Key features of a Splitwise-type app
+
+From research of the Splitwise app:
+
+* Users can create groups (or 1-to-1) of participants. ([Wikipedia][1])
+* Add expenses: specify who paid, amount, date, participants involved, optionally items or categories. ([WIRED][2])
+* The app computes “who owes whom” and the net balances, plus simplifies (minimises) the number of transactions. ([Wikipedia][1])
+* Settle up: users can mark debts settled, record payments (maybe via external payment services). ([WIRED][2])
+* Notifications and summary balances.
+* (Optional premium features) receipt scanning, multi-currency support, category charts. ([WIRED][2])
+
+So your app should target these core flows: group creation/management; expense entry; balance calculation; settlement; UI for summary.
+
+---
+
+## 2. Local vs Backend: “70% logic in-app”
+
+Here’s how you might split responsibilities:
+
+### Local (on device) responsibilities (≈70%):
+
+* Store the group and participant data, expense records, local state.
+* Perform the majority of computations: splitting logic, netting balances, simplification of who owes whom.
+* Offline-capable UI: adding expense while offline, showing local history, summary dashboards.
+* Marking settlement locally, tracking statuses.
+* UI/UX, animations, interactions.
+
+### Minimal backend responsibilities:
+
+* User authentication (optional; or local only with device-based identity if you want ultra-minimal backend).
+* Syncing across devices (if you support multiple devices or cross-device).
+* Persistent cloud storage (if you want backup) or sharing between group members.
+* Push notifications (for inviting friends, settling up).
+* Optionally backend for sending invites, group membership orchestration.
+* Possibly payments/settlement (if you integrate payments; but you could defer that to external service or separate)
+
+In effect: local handles as much as possible; backend is thin—data store + minimal sync/invites. This meets your goal of “minimal backend”.
+
+---
+
+## 3. Architecture & data flow
+
+Here’s a rough architecture for the iOS app:
+
+### Data model (on device)
+
+* **User**: local user ID, name, maybe email/phone.
+* **Group**: group ID, name, list of participants (names + IDs).
+* **Participant**: in group, each user/one-time participant.
+* **Expense**: expense ID, amount, currency, date, payer (participant), list of split participants + their share, category (optional), description.
+* **Balance/Net**: derived data: for each pair, how much A owes B, or net balances per group.
+* **Settlement**: records of payments/settlements marked done.
+
+### Logic
+
+* When an expense is added, local logic calculates each participant’s share: e.g., equal split or defined shares.
+* Update netting: update for each participant how much they owe or are owed. Then simplify – e.g., if A owes B $10, B owes C $10, then maybe A owes C directly (simplification algorithm).
+* UI shows “you owe X”, “X owes you”, “group summary”.
+* Support editing/deleting expense, adjusting shares.
+
+### Sync / backend
+
+* When app starts (or when internet available): sync local changes to backend; fetch changes others made (if groups involve multiple devices/users).
+* Use minimal endpoints: login/register, fetch groups, fetch participants, fetch expenses, post new expense, post settlement.
+* Optionally conflict resolution: last write wins or merge logic.
+
+### Offline & local-first
+
+* Local database (e.g., SQLite or Core Data) holds everything.
+* User can operate offline: add expenses, view balances.
+* When device comes online, sync up.
+
+### UI
+
+* List of groups.
+* Inside group: list of participants; summary at top (net balances).
+* “Add expense” form.
+* History list of expenses.
+* “Settle up” button / mark payment done.
+* Maybe a dashboard for all groups.
+
+---
+
+## 4. Which ~70% features to focus on in-app
+
+Given your “70% logic in app” aim, focus on these:
+
+* Expense entry (with splits)
+* Balance calculations & netting / simplifying.
+* Offline capable data model & UI.
+* Show who owes whom, summary visualisation.
+* Group management locally (create, invite participants, maybe local only).
+* Settlement marking and updating balances.
+
+Then leave these for backend (or minimal):
+
+* Multi-device sync + sharing.
+* Authentication / user accounts across devices.
+* Push notifications.
+* Payments integration (if you plan)
+* Cloud backup / restore.
+
+---
+
+## 5. Technical stack suggestions (for iOS)
+
+Given iPhone app:
+
+* Language: Swift (or SwiftUI for UI)
+* Local storage: Core Data or SQLite (via e.g., GRDB or Realm)
+* Networking: URLSession to minimal REST API
+* Offline-first pattern: local store with sync queue
+* Architectural pattern: MVVM / Clean Architecture
+* For simplification logic: implement graph-algorithm locally: you have participants with balances, then simplify cycle of debts to minimise transactions.
+* UI: use list views, forms, maybe charts (if you add).
+* Dependency injection for testability.
+
+---
+
+## 6. Example expense-splitting logic
+
+Here is a sketch of how you might implement the “simplify debts” logic locally:
+
+1. For a group, you have participants P1…Pn.
+2. You compute each participant’s net balance: positive means they are owed, negative means they owe.
+3. While there are both positive and negative balances:
+
+   * Select the largest debtor (most negative) and largest creditor (most positive).
+   * Create a payment from debtor → creditor of min( |debtor.balance|, creditor.balance ).
+   * Adjust balances accordingly.
+   * Repeat until all balances ~0.
+4. This gives a minimal (or near-minimal) set of transactions.
+
+You can code this entirely client-side.
+
+---
+
+## 7. UI/UX considerations for iPhone
+
+* Simple onboarding: just ask for name, maybe optional email/phone.
+* Home screen: list of groups + “+ New Group” button.
+* Inside group: header with group name & total standing (you owe / you are owed).
+* Add expense screen: amount, payer (dropdown), participants (checkbox list), split type (equal / custom), description, date.
+* Expense list: shows date, description, amount, payer, who owes what.
+* “Settle up” screen: show list of suggested transactions (after simplification) with a “Mark Paid” button for each.
+* Visual cues: green for you are owed, red for you owe.
+* Offline mode indicator.
+
+---
+
+## 8. Backend minimal schema & endpoints
+
+**Possible data tables** (for backend): Users, Groups, GroupParticipants, Expenses, Settlements.
+
+**API endpoints** (basic):
+
+* `POST /signup`, `POST /login`
+* `GET /groups`
+* `POST /groups` (create)
+* `PUT /groups/{id}` (invite participants etc)
+* `GET /groups/{id}/expenses`
+* `POST /groups/{id}/expenses`
+* `PUT /groups/{id}/expenses/{expenseId}`
+* `POST /groups/{id}/settlements` (mark payment)
+* `GET /groups/{id}/participants`
+
+The backend does no heavy logic; just stores & retrieves. All the splitting and netting logic is client-side.
+
+---
+
+## 9. Challenges & trade-offs
+
+* **Data consistency**: When multiple devices/users edit the same group/expense, syncing and conflict resolution can become tricky. If you push most logic to client, you need a robust sync mechanism.
+* **Offline + sync**: Managing queuing of edits while offline, and then merging when online.
+* **Security & privacy**: If you store financial-type data (even just amounts), ensure encryption at rest, secure transmission.
+* **Scaling if many users**: Even though your backend is minimal, you still must design for growth if you support many users.
+* **Payment integration**: If you add “settle up with payment” feature, regulatory, banking and compliance issues. For now you might skip this and just track debts.
+* **Simplification logic correctness**: The algorithm must handle edge cases (multiple splits, variable shares, deletes/edits).
+* **UX for sharing groups**: Invites, linking user accounts, joining existing groups.
+* **Currency support**: If you support multiple currencies, local logic must convert and maybe backend store multiple currencies.
+* **Backup & restore**: If data is only local and device lost, user loses data — you may need optional cloud backup.
+
+---
+
+## 10. Roadmap / Implementation plan
+
+Here’s a suggested phased plan:
+
+**Phase 1** – local app only (no backend):
+
+* Build data model, local storage for groups, participants, expenses.
+* Implement UI flows for creating groups, adding participants, adding expenses, viewing balances.
+* Implement netting and simplification algorithm.
+* Offline only (everything local).
+* Provide manual “export” (CSV) so user can back up.
+
+**Phase 2** – minimal backend & sync:
+
+* Build backend (e.g., serverless backend or simple REST on Node/Python).
+* Add authentication and user account.
+* Sync groups/expenses across devices/users.
+* Invite participants, accept invites.
+* Handle conflict resolution.
+
+**Phase 3** – optional extras:
+
+* Push notifications for invites/settlements.
+* Payment integration (optional).
+* Receipt scanning, multi-currency support, charts.
+* Premium version / subscription features.
+
+---
+
+If you like, I can **sketch a full iOS project structure** (folders, classes, sample code) and show you **some of the core algorithms in Swift** for expense splitting + simplifying. Do you want me to do that?
+
+[1]: https://en.wikipedia.org/wiki/Splitwise?utm_source=chatgpt.com "Splitwise"
+[2]: https://www.wired.com/story/expense-bill-splitting-apps?utm_source=chatgpt.com "7 Apps That Make It Simple to Split the Bill"
+
