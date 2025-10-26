@@ -38,31 +38,32 @@ jobs:
 
       - name: Test API with curl
         run: |
+          set -e
           echo "--- Sign up ---"
           curl -X POST -H "Content-Type: application/json" -d '{"name":"testuser","email":"test@example.com","password":"password"}' http://127.0.0.1:5000/api/auth/signup
-          echo "
-
---- Log in ---"
+          echo "\n\n--- Log in ---"
           TOKEN=$(curl -s -X POST -H "Content-Type: application/json" -d '{"email":"test@example.com","password":"password"}' http://127.0.0.1:5000/api/auth/login | jq -r .access_token)
+          if [ -z "$TOKEN" ]; then
+            echo "Failed to get token"
+            exit 1
+          fi
           echo "Token: $TOKEN"
 
-          echo "
-
---- Create Group ---"
-          GROUP_ID=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Test Group","participant_ids":[]}' http://127.0.0.1:5000/api/groups | jq -r .group_id)
+          echo "\n\n--- Create Group ---"
+          GROUP_RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Test Group","participant_ids":[]}' http://127.0.0.1:5000/api/groups)
+          GROUP_ID=$(echo $GROUP_RESPONSE | jq -r .group_id)
+          if [ -z "$GROUP_ID" ]; then
+            echo "Failed to create group"
+            echo "Response: $GROUP_RESPONSE"
+            exit 1
+          fi
           echo "Group ID: $GROUP_ID"
 
-          echo "
-
---- Get Groups ---"
+          echo "\n\n--- Get Groups ---"
           curl -X GET -H "Authorization: Bearer $TOKEN" http://127.0.0.1:5000/api/groups
 
-          echo "
-
---- Add Expense ---"
+          echo "\n\n--- Add Expense ---"
           curl -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"title":"Test Expense","amount":100.00}' http://127.0.0.1:5000/api/groups/$GROUP_ID/expenses
 
-          echo "
-
---- Get Expenses ---"
+          echo "\n\n--- Get Expenses ---"
           curl -X GET -H "Authorization: Bearer $TOKEN" http://127.0.0.1:5000/api/groups/$GROUP_ID/expenses
